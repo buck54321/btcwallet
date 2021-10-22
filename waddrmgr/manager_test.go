@@ -2629,6 +2629,7 @@ func TestNewRawAccountWatchingOnly(t *testing.T) {
 	if accountKey == nil {
 		return
 	}
+	accountKey, _ = accountKey.Neuter()
 
 	// With the scoped manager retrieved, we'll attempt to create a new raw
 	// account by number.
@@ -2718,6 +2719,7 @@ func testNewRawAccount(t *testing.T, _ *Manager, db walletdb.DB,
 	// With the account created, we should be able to derive new addresses
 	// from the account.
 	var accountAddrNext ManagedAddress
+
 	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 

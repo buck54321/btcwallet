@@ -251,6 +251,18 @@ type ScopedKeyManager struct {
 	mtx sync.RWMutex
 }
 
+// cryptoKeyPriv returns the rootManager's cryptoKeyPriv.
+func (s *ScopedKeyManager) cryptoKeyPriv() EncryptorDecryptor {
+	k, _ := s.rootManager.cryptoKeys()
+	return k
+}
+
+// cryptoKeyPriv returns the rootManager's cryptoKeyScript.
+func (s *ScopedKeyManager) cryptoKeyScript() EncryptorDecryptor {
+	_, sk := s.rootManager.cryptoKeys()
+	return sk
+}
+
 // Scope returns the exact KeyScope of this scoped key manager.
 func (s *ScopedKeyManager) Scope() KeyScope {
 	return s.scope
@@ -424,10 +436,16 @@ func (s *ScopedKeyManager) loadAccountInfo(ns walletdb.ReadBucket,
 		}
 
 		if hasPrivateKey {
+			// cryptoKeyPriv will be nil if the address manager is locked.
+			cryptoKeyPriv := s.cryptoKeyPriv()
+			if cryptoKeyPriv == nil {
+				return nil, managerError(ErrLocked, errLocked, nil)
+			}
+
 			// Use the crypto private key to decrypt the account
 			// private extended keys.
 			acctInfo.acctKeyPriv, err = decryptKey(
-				s.rootManager.cryptoKeyPriv, row.privKeyEncrypted,
+				cryptoKeyPriv, row.privKeyEncrypted,
 			)
 			if err != nil {
 				str := fmt.Sprintf("failed to decrypt private "+
@@ -1465,7 +1483,9 @@ func (s *ScopedKeyManager) NewRawAccount(ns walletdb.ReadWriteBucket, number uin
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	if s.rootManager.IsLocked() {
+	// cryptoKeyPriv will be nil if the address manager is locked.
+	cryptoKeyPriv := s.cryptoKeyPriv()
+	if cryptoKeyPriv == nil {
 		return managerError(ErrLocked, errLocked, nil)
 	}
 
@@ -1473,7 +1493,7 @@ func (s *ScopedKeyManager) NewRawAccount(ns walletdb.ReadWriteBucket, number uin
 	// derivation, we'll create a new name for this account based off of
 	// the account number.
 	name := fmt.Sprintf("act:%v", number)
-	return s.newAccount(ns, number, name)
+	return s.newAccount(ns, cryptoKeyPriv, number, name)
 }
 
 // NewRawAccountWatchingOnly creates a new watching only account for the scoped
@@ -1519,7 +1539,9 @@ func (s *ScopedKeyManager) NewAccount(ns walletdb.ReadWriteBucket, name string) 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	if s.rootManager.IsLocked() {
+	// cryptoKeyPriv will be nil if the address manager is locked.
+	cryptoKeyPriv := s.cryptoKeyPriv()
+	if cryptoKeyPriv == nil {
 		return 0, managerError(ErrLocked, errLocked, nil)
 	}
 
@@ -1534,7 +1556,7 @@ func (s *ScopedKeyManager) NewAccount(ns walletdb.ReadWriteBucket, name string) 
 
 	// With the name validated, we'll create a new account for the new
 	// contiguous account.
-	if err := s.newAccount(ns, account, name); err != nil {
+	if err := s.newAccount(ns, cryptoKeyPriv, account, name); err != nil {
 		return 0, err
 	}
 
@@ -1547,7 +1569,7 @@ func (s *ScopedKeyManager) NewAccount(ns walletdb.ReadWriteBucket, name string) 
 //
 // NOTE: This function MUST be called with the manager lock held for writes.
 func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
-	account uint32, name string) error {
+	cryptoKeyPriv EncryptorDecryptor, account uint32, name string) error {
 
 	// Validate the account name.
 	if err := ValidateAccountName(name); err != nil {
@@ -1569,7 +1591,7 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 	}
 
 	// Decrypt the cointype key.
-	serializedKeyPriv, err := s.rootManager.cryptoKeyPriv.Decrypt(coinTypePrivEnc)
+	serializedKeyPriv, err := cryptoKeyPriv.Decrypt(coinTypePrivEnc)
 	if err != nil {
 		str := fmt.Sprintf("failed to decrypt cointype serialized private key")
 		return managerError(ErrLocked, str, err)
@@ -1602,7 +1624,7 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 		str := "failed to  encrypt public key for account"
 		return managerError(ErrCrypto, str, err)
 	}
-	acctPrivEnc, err := s.rootManager.cryptoKeyPriv.Encrypt(
+	acctPrivEnc, err := cryptoKeyPriv.Encrypt(
 		[]byte(acctKeyPriv.String()),
 	)
 	if err != nil {
@@ -1828,8 +1850,9 @@ func (s *ScopedKeyManager) ImportPrivateKey(ns walletdb.ReadWriteBucket,
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	// The manager must be unlocked to encrypt the imported private key.
-	if s.rootManager.IsLocked() && !s.rootManager.WatchOnly() {
+	// cryptoKeyPriv will be nil if the address manager is locked.
+	cryptoKeyPriv := s.cryptoKeyPriv()
+	if cryptoKeyPriv == nil {
 		return nil, managerError(ErrLocked, errLocked, nil)
 	}
 
@@ -1838,7 +1861,7 @@ func (s *ScopedKeyManager) ImportPrivateKey(ns walletdb.ReadWriteBucket,
 	if !s.rootManager.WatchOnly() {
 		privKeyBytes := wif.PrivKey.Serialize()
 		var err error
-		encryptedPrivKey, err = s.rootManager.cryptoKeyPriv.Encrypt(privKeyBytes)
+		encryptedPrivKey, err = cryptoKeyPriv.Encrypt(privKeyBytes)
 		zero.Bytes(privKeyBytes)
 		if err != nil {
 			str := fmt.Sprintf("failed to encrypt private key for %x",
@@ -2032,11 +2055,6 @@ func (s *ScopedKeyManager) ImportScript(ns walletdb.ReadWriteBucket,
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	// The manager must be unlocked to encrypt the imported script.
-	if s.rootManager.IsLocked() {
-		return nil, managerError(ErrLocked, errLocked, nil)
-	}
-
 	// Prevent duplicates.
 	scriptHash := btcutil.Hash160(script)
 	alreadyExists := s.existsAddress(ns, scriptHash)
@@ -2059,7 +2077,13 @@ func (s *ScopedKeyManager) ImportScript(ns walletdb.ReadWriteBucket,
 	// key when not a watching-only address manager.
 	var encryptedScript []byte
 	if !s.rootManager.WatchOnly() {
-		encryptedScript, err = s.rootManager.cryptoKeyScript.Encrypt(
+		// cryptoKeyScript will be nil if the address manager is locked.
+		cryptoKeyScript := s.cryptoKeyScript()
+		if cryptoKeyScript == nil {
+			return nil, managerError(ErrLocked, errLocked, nil)
+		}
+
+		encryptedScript, err = cryptoKeyScript.Encrypt(
 			script,
 		)
 		if err != nil {

@@ -500,6 +500,16 @@ func (m *Manager) Close() {
 	m.closed = true
 }
 
+// cryptoKeys returns the cryptoKeyPriv and cryptoKeyPriv under RLock.
+func (s *Manager) cryptoKeys() (priv, script EncryptorDecryptor) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.locked {
+		return nil, nil
+	}
+	return s.cryptoKeyPriv, s.cryptoKeyPriv
+}
+
 // NewScopedKeyManager creates a new scoped key manager from the root manager. A
 // scoped key manager is a sub-manager that only has the coin type key of a
 // particular coin type and BIP0043 purpose. This is useful as it enables

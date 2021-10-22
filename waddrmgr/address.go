@@ -288,18 +288,16 @@ func (a *managedAddress) PrivKey() (*btcec.PrivateKey, error) {
 		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
 	}
 
-	a.manager.mtx.Lock()
-	defer a.manager.mtx.Unlock()
-
-	// Account manager must be unlocked to decrypt the private key.
-	if a.manager.rootManager.IsLocked() {
+	// cryptoKeyPriv will be nil if the address manager is locked.
+	cryptoKeyPriv := a.manager.cryptoKeyPriv()
+	if cryptoKeyPriv == nil {
 		return nil, managerError(ErrLocked, errLocked, nil)
 	}
 
 	// Decrypt the key as needed.  Also, make sure it's a copy since the
 	// private key stored in memory can be cleared at any time.  Otherwise
 	// the returned private key could be invalidated from under the caller.
-	privKeyCopy, err := a.unlock(a.manager.rootManager.cryptoKeyPriv)
+	privKeyCopy, err := a.unlock(cryptoKeyPriv)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +436,14 @@ func newManagedAddress(s *ScopedKeyManager, derivationPath DerivationPath,
 	// NOTE: The privKeyBytes here are set into the managed address which
 	// are cleared when locked, so they aren't cleared here.
 	privKeyBytes := privKey.Serialize()
-	privKeyEncrypted, err := s.rootManager.cryptoKeyPriv.Encrypt(privKeyBytes)
+
+	// cryptoKeyPriv will be nil if the address manager is locked.
+	cryptoKeyPriv := s.cryptoKeyPriv()
+	if cryptoKeyPriv == nil {
+		return nil, managerError(ErrLocked, errLocked, nil)
+	}
+
+	privKeyEncrypted, err := cryptoKeyPriv.Encrypt(privKeyBytes)
 	if err != nil {
 		str := "failed to encrypt private key"
 		return nil, managerError(ErrCrypto, str, err)
@@ -619,18 +624,16 @@ func (a *scriptAddress) Script() ([]byte, error) {
 		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
 	}
 
-	a.manager.mtx.Lock()
-	defer a.manager.mtx.Unlock()
-
-	// Account manager must be unlocked to decrypt the script.
-	if a.manager.rootManager.IsLocked() {
+	// cryptoKeyScript will be nil if the address manager is locked.
+	cryptoKeyScript := a.manager.cryptoKeyScript()
+	if cryptoKeyScript == nil {
 		return nil, managerError(ErrLocked, errLocked, nil)
 	}
 
 	// Decrypt the script as needed.  Also, make sure it's a copy since the
 	// script stored in memory can be cleared at any time.  Otherwise,
 	// the returned script could be invalidated from under the caller.
-	return a.unlock(a.manager.rootManager.cryptoKeyScript)
+	return a.unlock(cryptoKeyScript)
 }
 
 // newScriptAddress initializes and returns a new pay-to-script-hash address.
