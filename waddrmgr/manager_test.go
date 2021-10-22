@@ -2629,6 +2629,7 @@ func TestNewRawAccountWatchingOnly(t *testing.T) {
 	if accountKey == nil {
 		return
 	}
+	accountKey, _ = accountKey.Neuter()
 
 	// With the scoped manager retrieved, we'll attempt to create a new raw
 	// account by number.

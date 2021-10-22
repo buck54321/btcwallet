@@ -299,7 +299,12 @@ func (a *managedAddress) PrivKey() (*btcec.PrivateKey, error) {
 	// Decrypt the key as needed.  Also, make sure it's a copy since the
 	// private key stored in memory can be cleared at any time.  Otherwise
 	// the returned private key could be invalidated from under the caller.
-	privKeyCopy, err := a.unlock(a.manager.rootManager.cryptoKeyPriv)
+	var privKeyCopy []byte
+	var err error
+	err = a.manager.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+		privKeyCopy, err = a.unlock(cryptoKeyPriv)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +443,12 @@ func newManagedAddress(s *ScopedKeyManager, derivationPath DerivationPath,
 	// NOTE: The privKeyBytes here are set into the managed address which
 	// are cleared when locked, so they aren't cleared here.
 	privKeyBytes := privKey.Serialize()
-	privKeyEncrypted, err := s.rootManager.cryptoKeyPriv.Encrypt(privKeyBytes)
+	var privKeyEncrypted []byte
+	var err error
+	err = s.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+		privKeyEncrypted, err = cryptoKeyPriv.Encrypt(privKeyBytes)
+		return err
+	})
 	if err != nil {
 		str := "failed to encrypt private key"
 		return nil, managerError(ErrCrypto, str, err)
@@ -613,7 +623,7 @@ func (a *scriptAddress) Used(ns walletdb.ReadBucket) bool {
 // Script returns the script associated with the address.
 //
 // This implements the ScriptAddress interface.
-func (a *scriptAddress) Script() ([]byte, error) {
+func (a *scriptAddress) Script() (script []byte, err error) {
 	// No script is available for a watching-only address manager.
 	if a.manager.rootManager.WatchOnly() {
 		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
@@ -630,7 +640,11 @@ func (a *scriptAddress) Script() ([]byte, error) {
 	// Decrypt the script as needed.  Also, make sure it's a copy since the
 	// script stored in memory can be cleared at any time.  Otherwise,
 	// the returned script could be invalidated from under the caller.
-	return a.unlock(a.manager.rootManager.cryptoKeyScript)
+	err = a.manager.withCryptoKeys(func(_, cryptoKeyScript EncryptorDecryptor) error {
+		script, err = a.unlock(cryptoKeyScript)
+		return err
+	})
+	return script, err
 }
 
 // newScriptAddress initializes and returns a new pay-to-script-hash address.

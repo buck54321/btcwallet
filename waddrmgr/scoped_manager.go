@@ -283,6 +283,15 @@ func (s *ScopedKeyManager) Close() {
 	s.zeroSensitivePublicData()
 }
 
+func (s *ScopedKeyManager) withCryptoKeys(f func(priv, script EncryptorDecryptor) error) error {
+	s.rootManager.mtx.RLock()
+	defer s.rootManager.mtx.RUnlock()
+	if s.rootManager.locked {
+		return fmt.Errorf("manager locked")
+	}
+	return f(s.rootManager.cryptoKeyPriv, s.rootManager.cryptoKeyScript)
+}
+
 // keyToManaged returns a new managed address for the provided derived key and
 // its derivation path which consists of the account, branch, and index.
 //
@@ -426,9 +435,12 @@ func (s *ScopedKeyManager) loadAccountInfo(ns walletdb.ReadBucket,
 		if hasPrivateKey {
 			// Use the crypto private key to decrypt the account
 			// private extended keys.
-			acctInfo.acctKeyPriv, err = decryptKey(
-				s.rootManager.cryptoKeyPriv, row.privKeyEncrypted,
-			)
+			err := s.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+				acctInfo.acctKeyPriv, err = decryptKey(
+					cryptoKeyPriv, row.privKeyEncrypted,
+				)
+				return err
+			})
 			if err != nil {
 				str := fmt.Sprintf("failed to decrypt private "+
 					"key for account %d", account)
@@ -1569,7 +1581,11 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 	}
 
 	// Decrypt the cointype key.
-	serializedKeyPriv, err := s.rootManager.cryptoKeyPriv.Decrypt(coinTypePrivEnc)
+	var serializedKeyPriv []byte
+	err = s.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+		serializedKeyPriv, err = cryptoKeyPriv.Decrypt(coinTypePrivEnc)
+		return err
+	})
 	if err != nil {
 		str := fmt.Sprintf("failed to decrypt cointype serialized private key")
 		return managerError(ErrLocked, str, err)
@@ -1602,9 +1618,14 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 		str := "failed to  encrypt public key for account"
 		return managerError(ErrCrypto, str, err)
 	}
-	acctPrivEnc, err := s.rootManager.cryptoKeyPriv.Encrypt(
-		[]byte(acctKeyPriv.String()),
-	)
+
+	var acctPrivEnc []byte
+	err = s.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+		acctPrivEnc, err = cryptoKeyPriv.Encrypt(
+			[]byte(acctKeyPriv.String()),
+		)
+		return err
+	})
 	if err != nil {
 		str := "failed to encrypt private key for account"
 		return managerError(ErrCrypto, str, err)
@@ -1838,7 +1859,10 @@ func (s *ScopedKeyManager) ImportPrivateKey(ns walletdb.ReadWriteBucket,
 	if !s.rootManager.WatchOnly() {
 		privKeyBytes := wif.PrivKey.Serialize()
 		var err error
-		encryptedPrivKey, err = s.rootManager.cryptoKeyPriv.Encrypt(privKeyBytes)
+		err = s.withCryptoKeys(func(cryptoKeyPriv, _ EncryptorDecryptor) error {
+			encryptedPrivKey, err = cryptoKeyPriv.Encrypt(privKeyBytes)
+			return err
+		})
 		zero.Bytes(privKeyBytes)
 		if err != nil {
 			str := fmt.Sprintf("failed to encrypt private key for %x",
@@ -2059,9 +2083,12 @@ func (s *ScopedKeyManager) ImportScript(ns walletdb.ReadWriteBucket,
 	// key when not a watching-only address manager.
 	var encryptedScript []byte
 	if !s.rootManager.WatchOnly() {
-		encryptedScript, err = s.rootManager.cryptoKeyScript.Encrypt(
-			script,
-		)
+		err = s.withCryptoKeys(func(_, cryptoKeyScript EncryptorDecryptor) error {
+			encryptedScript, err = cryptoKeyScript.Encrypt(
+				script,
+			)
+			return err
+		})
 		if err != nil {
 			str := fmt.Sprintf("failed to encrypt script for %x",
 				scriptHash)
