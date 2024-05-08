@@ -7,6 +7,7 @@ package wallet
 import (
 	"github.com/btcsuite/btclog"
 	"github.com/dcrlabs/ltcwallet/chain"
+	"github.com/dcrlabs/ltcwallet/spv"
 	"github.com/dcrlabs/ltcwallet/waddrmgr"
 	"github.com/dcrlabs/ltcwallet/walletdb/migration"
 	"github.com/dcrlabs/ltcwallet/wtxmgr"
@@ -38,6 +39,21 @@ func UseLogger(logger btclog.Logger) {
 	waddrmgr.UseLogger(logger)
 	wtxmgr.UseLogger(logger)
 	chain.UseLogger(logger)
+}
+
+// LogGenerate is an interface capable of generating loggers.
+type LogGenerator interface {
+	NewLogger(name string) btclog.Logger
+}
+
+// UseLogGenerator will set the logger for all subpackages with unique names.
+func UseLogGenerator(g LogGenerator) {
+	log = g.NewLogger("WLLT")
+	migration.UseLogger(g.NewLogger("MGRTN"))
+	waddrmgr.UseLogger(g.NewLogger("ADRMGR"))
+	wtxmgr.UseLogger(g.NewLogger("TXMGR"))
+	chain.UseLogger(g.NewLogger("CHAIN"))
+	spv.UseLogGenerator(g)
 }
 
 // pickNoun returns the singular or plural form of a noun depending

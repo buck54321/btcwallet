@@ -47,3 +47,21 @@ func UseLogger(logger btclog.Logger) {
 	filterdb.UseLogger(logger)
 	chanutils.UseLogger(logger)
 }
+
+// LogGenerate is an interface capable of generating loggers.
+type LogGenerator interface {
+	NewLogger(name string) btclog.Logger
+}
+
+// UseLogGenerator will set the logger for all subpackages with unique names.
+func UseLogGenerator(g LogGenerator) {
+	log = g.NewLogger("SPV")
+	blockchain.UseLogger(g.NewLogger("BLKCHN"))
+	txscript.UseLogger(g.NewLogger("TXSCRIPT"))
+	peer.UseLogger(g.NewLogger("PEER"))
+	addrmgr.UseLogger(g.NewLogger("ADRMGR"))
+	blockntfns.UseLogger(g.NewLogger("BLKNOTE"))
+	pushtx.UseLogger(g.NewLogger("PUSHTX"))
+	connmgr.UseLogger(g.NewLogger("CONNMGR"))
+	query.UseLogger(g.NewLogger("QUERY"))
+}
