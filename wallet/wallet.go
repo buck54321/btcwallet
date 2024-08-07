@@ -1387,6 +1387,7 @@ type (
 func (w *Wallet) endRecoveryAndWait() {
 	if recoverySyncI := w.recovering.Load(); recoverySyncI != nil {
 		recoverySync := recoverySyncI.(*recoverySyncer)
+
 		// If recovery is still running, it will end early with an error
 		// once we set the quit flag.
 		atomic.StoreUint32(&recoverySync.quit, 1)
