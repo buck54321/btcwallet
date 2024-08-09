@@ -138,7 +138,7 @@ type Wallet struct {
 	lockedOutpoints    map[wire.OutPoint]struct{}
 	lockedOutpointsMtx sync.Mutex
 
-	recovering     atomic.Value
+	recovering     atomic.Value // *recoverySyncer
 	recoveryWindow uint32
 
 	// Channels for rescan processing.  Requests are added and merged with
@@ -280,7 +280,7 @@ func (w *Wallet) quitChan() <-chan struct{} {
 
 // Stop signals all wallet goroutines to shutdown.
 func (w *Wallet) Stop() {
-	w.endRecoveryAndWait()
+	<-w.endRecovery()
 
 	w.quitMu.Lock()
 	quit := w.quit
@@ -1382,9 +1382,9 @@ type (
 	heldUnlock chan struct{}
 )
 
-// endRecoveryAndWait tells (*Wallet).recovery to stop, if running, and waits
-// for it to exit.
-func (w *Wallet) endRecoveryAndWait() {
+// endRecovery tells (*Wallet).recovery to stop, if running, and returns a
+// channel that will be closed when the recovery routine exits.
+func (w *Wallet) endRecovery() <-chan struct{} {
 	if recoverySyncI := w.recovering.Load(); recoverySyncI != nil {
 		recoverySync := recoverySyncI.(*recoverySyncer)
 
@@ -1392,11 +1392,11 @@ func (w *Wallet) endRecoveryAndWait() {
 		// once we set the quit flag.
 		atomic.StoreUint32(&recoverySync.quit, 1)
 
-		select {
-		case <-recoverySync.done:
-		case <-w.quitChan():
-		}
+		return recoverySync.done
 	}
+	c := make(chan struct{})
+	close(c)
+	return c
 }
 
 // walletLocker manages the locked/unlocked state of a wallet.
@@ -1491,7 +1491,7 @@ out:
 
 		// We can't lock the manager if recovery is active because we use
 		// cryptoKeyPriv and cryptoKeyScript in recovery.
-		w.endRecoveryAndWait()
+		<-w.endRecovery()
 
 		timeout = nil
 		err := w.Manager.Lock()
